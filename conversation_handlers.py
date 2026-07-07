@@ -4,6 +4,8 @@ import logging
 from google import genai
 from google.genai import types
 
+from bot import compose
+
 logger = logging.getLogger("ConversationHandler")
 
 def get_gemini_client():
@@ -30,9 +32,10 @@ def respond(state: dict, merchant_message: str) -> dict:
     client = get_gemini_client()
     if not client:
         return {
-            "action": "wait",
-            "wait_seconds": 300,
-            "rationale": "No LLM client key configured in environment."
+            "action": "send",
+            "body": "Thanks — I can help with a simple next step for you.",
+            "cta": "open_ended",
+            "rationale": "No LLM client key configured, so the handler used a deterministic fallback response."
         }
 
     # Normalize state history if not already formatted

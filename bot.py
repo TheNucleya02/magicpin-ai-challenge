@@ -34,6 +34,155 @@ suppressed_keys: Dict[str, float] = {}
 # HELPER FUNCTIONS & DETECTORS
 # =============================================================================
 
+def _get_offer_titles(merchant: Optional[dict]) -> List[str]:
+    offers = merchant.get("offers", []) if merchant else []
+    titles = []
+    for offer in offers:
+        title = offer.get("title") or offer.get("name")
+        if title and offer.get("status") != "expired":
+            titles.append(title)
+    return titles
+
+
+def _greeting_name(merchant: Optional[dict], customer: Optional[dict]) -> str:
+    if customer and customer.get("identity", {}).get("name"):
+        return customer["identity"]["name"]
+    if merchant and merchant.get("identity", {}).get("owner_first_name"):
+        return merchant["identity"]["owner_first_name"]
+    return "Partner"
+
+
+def _merchant_name(merchant: Optional[dict]) -> str:
+    if merchant and merchant.get("identity", {}).get("name"):
+        return merchant["identity"]["name"]
+    return "your business"
+
+
+def _is_hinglish(merchant: Optional[dict], customer: Optional[dict]) -> bool:
+    languages = []
+    if merchant and merchant.get("identity", {}).get("languages"):
+        languages.extend([str(lang).lower() for lang in merchant["identity"]["languages"]])
+    if customer and customer.get("identity", {}).get("language_pref"):
+        languages.append(str(customer["identity"]["language_pref"]).lower())
+    return any(lang.startswith("hi") or lang == "hindi" for lang in languages)
+
+
+def _compose_body(category: Optional[dict], merchant: Optional[dict], trigger: Optional[dict], customer: Optional[dict] = None) -> tuple[str, str]:
+    category_slug = (category or {}).get("slug", "general")
+    merchant_name = _merchant_name(merchant)
+    owner_name = _greeting_name(merchant, customer)
+    offer_titles = _get_offer_titles(merchant)
+    offer_title = offer_titles[0] if offer_titles else None
+    trigger_kind = (trigger or {}).get("kind", "generic")
+    payload = (trigger or {}).get("payload", {}) or {}
+    top_item = payload.get("top_item") or {}
+    title = top_item.get("title") or payload.get("title") or payload.get("headline")
+    source = top_item.get("source") or payload.get("source")
+    trial_n = top_item.get("trial_n") or payload.get("trial_n")
+    cta = "none"
+
+    if trigger_kind == "research_digest" and title:
+        if _is_hinglish(merchant, customer):
+            body = f"{owner_name}, {title}."
+            if source:
+                body += f" {source} se relevant insight hai."
+            if trial_n:
+                body += f" {trial_n}-patient study ka angle use kar sakte ho."
+            body += " Kya main isko aapke liye ek short patient WhatsApp draft mein convert kar doon?"
+        else:
+            body = f"{owner_name}, {title}."
+            if source:
+                body += f" Source: {source}."
+            if trial_n:
+                body += f" The {trial_n}-patient study is worth a look."
+            body += " Want me to turn this into a short patient WhatsApp draft?"
+        cta = "open_ended"
+        return body, cta
+
+    if trigger_kind == "recall_due" and customer:
+        customer_name = customer.get("identity", {}).get("name", "there")
+        if _is_hinglish(merchant, customer):
+            body = f"Hi {customer_name}, {merchant_name} se bol rahi hoon. Aapki recall window khul chuki hai."
+            if offer_title:
+                body += f" {offer_title} ka option abhi ready hai."
+            body += " Kya aap ek slot confirm karna chahenge?"
+        else:
+            body = f"Hi {customer_name}, this is {merchant_name}. Your recall window is open."
+            if offer_title:
+                body += f" {offer_title} is available now."
+            body += " Would you like to confirm a slot?"
+        cta = "multi_choice_slot"
+        return body, cta
+
+    if trigger_kind in {"perf_spike", "perf_dip"}:
+        perf = (merchant or {}).get("performance", {}) or {}
+        views = perf.get("views")
+        ctr = perf.get("ctr")
+        if _is_hinglish(merchant, customer):
+            body = f"{owner_name}, aapke latest numbers dekh kar lag raha hai ki aapka account momentum mein hai."
+            if ctr is not None:
+                body += f" Current CTR {ctr:.2%} hai."
+            if views is not None:
+                body += f" 30d views {views} hain."
+            body += " Kya main aapke liye ek quick next step suggest karun?"
+        else:
+            body = f"{owner_name}, your latest numbers suggest there is room to act now."
+            if ctr is not None:
+                body += f" Current CTR is {ctr:.2%}."
+            if views is not None:
+                body += f" You have {views} views in the last 30 days."
+            body += " Want me to suggest the next best step?"
+        cta = "binary_yes_no"
+        return body, cta
+
+    if trigger_kind == "milestone_reached":
+        if _is_hinglish(merchant, customer):
+            body = f"{owner_name}, aapne milestone cross kar liya hai. Main aapke liye ek short celebration post ya follow-up offer draft kar sakta hoon."
+        else:
+            body = f"{owner_name}, you’ve reached a meaningful milestone. I can draft a quick follow-up message or offer for you."
+        cta = "open_ended"
+        return body, cta
+
+    if trigger_kind in {"dormant_with_vera", "scheduled_recurring"}:
+        if _is_hinglish(merchant, customer):
+            body = f"{owner_name}, main soch rahi hoon ki aapka {category_slug} profile abhi thoda stale lag raha hai. Ek small refresh karna useful ho sakta hai."
+        else:
+            body = f"{owner_name}, your {category_slug} profile looks like it could use a small refresh. I can help with a quick update."
+        cta = "binary_yes_no"
+        return body, cta
+
+    if category_slug == "dentists":
+        if offer_title:
+            body = f"{owner_name}, {offer_title} ka option aapke clinic ke liye useful ho sakta hai. Main aapke liye ek short patient reminder draft kar sakta hoon."
+        else:
+            body = f"{owner_name}, aapke clinic ke liye ek simple, relevant update ready hai. Kya main use aapke patients tak bhej dun?"
+        cta = "open_ended"
+        return body, cta
+
+    if _is_hinglish(merchant, customer):
+        body = f"{owner_name}, main aapke liye ek simple, relevant update ready kar sakti hoon. Kya aap chahenge ki main use aapke business ke hisaab se tailor karun?"
+    else:
+        body = f"{owner_name}, I can help with a simple, relevant update tailored to your business. Would you like me to draft it?"
+    cta = "binary_yes_no"
+    return body, cta
+
+
+def compose(category: Optional[dict], merchant: Optional[dict], trigger: Optional[dict], customer: Optional[dict] = None) -> dict:
+    """Deterministic compose function that matches the submission contract in the challenge brief."""
+    body, cta = _compose_body(category, merchant, trigger, customer)
+    body = re.sub(r'https?://\S+|www\.\S+', '', body).strip()
+    body = re.sub(r'\s+', ' ', body).strip()
+    trigger = trigger or {}
+    send_as = "merchant_on_behalf" if trigger.get("scope") == "customer" else "vera"
+    return {
+        "body": body,
+        "cta": cta,
+        "send_as": send_as,
+        "suppression_key": trigger.get("suppression_key", f"trg:{trigger.get('id', 'default')}") ,
+        "rationale": "Used a deterministic, context-fit template that anchors on available facts and keeps the CTA single and low-friction.",
+    }
+
+
 def get_gemini_client() -> Optional[genai.Client]:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -197,9 +346,6 @@ async def teardown():
 @app.post("/v1/tick")
 async def tick(body: TickBody):
     client = get_gemini_client()
-    if not client:
-        return {"actions": []}
-        
     now_dt = datetime.fromisoformat(body.now.replace("Z", "+00:00"))
     
     # Filter expired suppressed keys
@@ -373,7 +519,7 @@ async def reply(body: ReplyBody):
 # =============================================================================
 
 def compose_action(
-    client: genai.Client,
+    client: Optional[genai.Client],
     category: dict,
     merchant: dict,
     trigger: dict,
@@ -381,6 +527,17 @@ def compose_action(
 ) -> Optional[dict]:
     
     send_as = "merchant_on_behalf" if trigger.get("scope") == "customer" else "vera"
+    if not client:
+        fallback = compose(category, merchant, trigger, customer)
+        fallback.update({
+            "conversation_id": f"conv_{merchant.get('merchant_id')}_{trigger.get('id')}",
+            "merchant_id": merchant.get("merchant_id"),
+            "customer_id": customer.get("customer_id") if customer else None,
+            "trigger_id": trigger.get("id"),
+            "template_name": "vera_generic_v1",
+            "template_params": [fallback["body"]],
+        })
+        return fallback
     
     # Build prompt instructions based on the categories, voice profile, and constraints
     voice = category.get("voice", {})
