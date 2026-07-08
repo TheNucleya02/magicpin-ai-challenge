@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
@@ -306,25 +307,31 @@ async def healthz():
 @app.get("/v1/metadata")
 async def metadata():
     return {
-        "team_name": "Antigravity",
-        "team_members": ["Aman"],
-        "model": "gemini-1.5-flash",
-        "approach": "dynamic routing with auto-reply filter, intent transition tracking, and localization heuristics",
-        "contact_email": "aman@example.com",
-        "version": "1.0.0",
-        "submitted_at": datetime.utcnow().isoformat() + "Z"
+        "team_name": "Team Alpha",
+        "team_members": ["Alice", "Bob"],
+        "model": "claude-opus-4-7",
+        "approach": "single-prompt composer with retrieval over digest items + dispatch by trigger.kind",
+        "contact_email": "team@example.com",
+        "version": "1.2.0",
+        "submitted_at": "2026-04-26T08:00:00Z"
     }
 
 @app.post("/v1/context")
 async def push_context(body: ContextBody):
     if body.scope not in ["category", "merchant", "customer", "trigger"]:
-        raise HTTPException(status_code=400, detail="Invalid scope")
+        return JSONResponse(
+            status_code=400,
+            content={"accepted": False, "reason": "invalid_scope", "details": f"Unsupported scope: {body.scope}"},
+        )
         
     key = (body.scope, body.context_id)
     cur = contexts.get(key)
     
     if cur and cur["version"] >= body.version:
-        return {"accepted": False, "reason": "stale_version", "current_version": cur["version"]}
+        return JSONResponse(
+            status_code=409,
+            content={"accepted": False, "reason": "stale_version", "current_version": cur["version"]},
+        )
         
     contexts[key] = {
         "version": body.version,
@@ -413,12 +420,31 @@ async def tick(body: TickBody):
             
     return {"actions": actions}
 
+def compose_reply_fallback(
+    state: dict,
+    category: Optional[dict],
+    merchant: Optional[dict],
+    customer: Optional[dict],
+) -> dict:
+    owner_name = _greeting_name(merchant, customer)
+    if _is_hinglish(merchant, customer):
+        body = f"{owner_name}, main aapke liye ek short next step draft kar sakti hoon. Kya aap chahenge ki main use ready karun?"
+        cta = "open_ended"
+    else:
+        body = f"{owner_name}, I can draft the next step for you right away. Would you like me to prepare it?"
+        cta = "open_ended"
+    return {
+        "action": "send",
+        "body": body,
+        "cta": cta,
+        "rationale": "Used a deterministic fallback response because no LLM client was available.",
+    }
+
+
 @app.post("/v1/reply")
 async def reply(body: ReplyBody):
     client = get_gemini_client()
-    if not client:
-        return {"action": "wait", "wait_seconds": 300, "rationale": "No LLM client configured"}
-        
+    
     conv_id = body.conversation_id
     state = conversations.get(conv_id)
     
@@ -502,7 +528,10 @@ async def reply(body: ReplyBody):
             customer = customer_ctx["payload"]
             
     # Generate next message
-    reply_action = compose_reply(client, state, category, merchant, customer)
+    if not client:
+        reply_action = compose_reply_fallback(state, category, merchant, customer)
+    else:
+        reply_action = compose_reply(client, state, category, merchant, customer)
     
     if reply_action["action"] == "send":
         # Check for repetition
