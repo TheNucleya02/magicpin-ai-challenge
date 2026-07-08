@@ -1,5 +1,10 @@
 # magicpin Vera AI Assistant - Submission README
 
+## Briefly
+- Approach: I built a deterministic, challenge-aligned composer that produces structured messages with a single CTA and a stable submission contract, while keeping Gemini as an optional enhancement path rather than a dependency.
+- Tradeoffs: I prioritized reliability, harness compatibility, and safe output formatting over highly stylized copy, which means the messages are more conservative but easier to validate consistently.
+- Additional context that would have helped most: more examples of ideal merchant/customer tone by category, clearer evaluation criteria for what makes a message “high quality,” and richer trigger payloads for edge cases.
+
 ## Approach
 This repository now centers on a deterministic, challenge-aligned composer that satisfies the submission contract in the brief without depending on an LLM for every turn. The core flow is:
 
