@@ -16,6 +16,8 @@ That's it!
 Author: magicpin AI Challenge Team
 """
 
+import os
+
 # =============================================================================
 # ██████  CONFIGURATION - EDIT THIS SECTION ██████
 # =============================================================================
@@ -24,13 +26,13 @@ Author: magicpin AI Challenge Team
 BOT_URL = "http://localhost:8080"
 
 # Choose your LLM provider: "openai", "anthropic", "gemini", "deepseek", "groq", "ollama", "openrouter"
-LLM_PROVIDER = "openai"
+LLM_PROVIDER = "gemini"
 
-# Your API key (paste your key here)
-LLM_API_KEY = ""  # <-- PUT YOUR API KEY HERE
+# Your API key (read from the environment so it is not hard-coded)
+LLM_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Model to use (leave empty for default, or specify like "gpt-4o", "claude-3-5-sonnet-20241022", etc.)
-LLM_MODEL = ""  # <-- Optional: specify model or leave empty for default
+LLM_MODEL = "gemini-2.5-flash"
 
 # For Ollama only: local server URL
 OLLAMA_URL = "http://localhost:11434"
@@ -42,12 +44,13 @@ TEST_SCENARIO = "all"
 # ██████  END OF CONFIGURATION - DON'T EDIT BELOW THIS LINE ██████
 # =============================================================================
 
-import os
 import sys
 import json
 import time
 import re
 import socket
+import ssl
+import certifi
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
@@ -58,6 +61,7 @@ from abc import ABC, abstractmethod
 # Constants
 TIMEOUT_LLM = 45
 DATASET_DIR = Path(__file__).parent / "dataset"
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 # =============================================================================
 # TERMINAL OUTPUT
@@ -176,7 +180,7 @@ class OpenAIProvider(LLMProvider):
             data=body,
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["choices"][0]["message"]["content"]
 
@@ -201,7 +205,7 @@ class AnthropicProvider(LLMProvider):
             headers={"x-api-key": self.api_key, "Content-Type": "application/json",
                      "anthropic-version": "2023-06-01"}
         )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["content"][0]["text"]
 
@@ -223,7 +227,7 @@ class GeminiProvider(LLMProvider):
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         req = urlrequest.Request(url, data=body, headers={"Content-Type": "application/json"})
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
@@ -248,7 +252,7 @@ class DeepSeekProvider(LLMProvider):
                             "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["choices"][0]["message"]["content"]
 
@@ -273,7 +277,7 @@ class GroqProvider(LLMProvider):
                             "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["choices"][0]["message"]["content"]
 
@@ -294,7 +298,7 @@ class OllamaProvider(LLMProvider):
                             "stream": False, "options": {"temperature": 0.2}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        resp = urlrequest.urlopen(req, timeout=90)
+        resp = urlrequest.urlopen(req, timeout=90, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["response"]
 
@@ -320,7 +324,7 @@ class OpenRouterProvider(LLMProvider):
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json",
                      "HTTP-Referer": "https://magicpin.com"}
         )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=SSL_CONTEXT)
         data = json.loads(resp.read().decode("utf-8"))
         return data["choices"][0]["message"]["content"]
 
@@ -396,7 +400,7 @@ class BotClient:
         req = urlrequest.Request(url, data=body, method=method, headers=headers)
 
         try:
-            resp = urlrequest.urlopen(req, timeout=timeout)
+            resp = urlrequest.urlopen(req, timeout=timeout, context=SSL_CONTEXT)
             return json.loads(resp.read().decode("utf-8")), None, (time.time() - start) * 1000
         except urlerror.HTTPError as e:
             latency = (time.time() - start) * 1000
